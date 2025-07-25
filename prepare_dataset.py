@@ -1,4 +1,4 @@
-# prepare_dataset.py
+# prepare_dataset.py (mit Dask und Fehlerkorrektur)
 import sys
 import os
 
@@ -28,6 +28,8 @@ import pandas as pd
 import xarray as xr
 import numpy as np
 import logging
+import dask
+from dask.distributed import Client
 
 # Import the original classes from your previous project
 from data_processing import DataProcessor
@@ -56,20 +58,29 @@ def calculate_monthly_indices(da_monthly):
 
 def run_data_preparation():
     """
-    Executes the entire data preparation process.
-    1. Loads ERA5 data.
+    Executes the entire data preparation process, parallelized with Dask.
+    1. Loads ERA5 data in parallel.
     2. Calculates monthly box averages and indices.
     3. Loads discharge data.
     4. Combines everything into a single DataFrame.
     5. Saves the final dataset.
     """
+    # Start a local Dask client to utilize all available CPU cores.
+    client = Client()
+    logging.info(f"Dask client started, dashboard available at: {client.dashboard_link}")
+    
     logging.info("Starting data preparation for the AI model...")
 
-    # --- 1. Load and process climate data (temperature, precipitation, wind) ---
-    logging.info("Loading ERA5 data...")
-    pr_monthly = DataProcessor.process_era5_file(cfg.ERA5_PR_FILE, 'pr')
-    tas_monthly = DataProcessor.process_era5_file(cfg.ERA5_TAS_FILE, 'tas')
-    ua850_monthly = DataProcessor.process_era5_file(cfg.ERA5_UA_FILE, 'u', 'ua', level_val=cfg.WIND_LEVEL)
+    # --- 1. Load and process climate data in parallel ---
+    logging.info("Lazily scheduling ERA5 data loading tasks...")
+    
+    lazy_pr = dask.delayed(DataProcessor.process_era5_file)(cfg.ERA5_PR_FILE, 'pr')
+    lazy_tas = dask.delayed(DataProcessor.process_era5_file)(cfg.ERA5_TAS_FILE, 'tas')
+    lazy_ua850 = dask.delayed(DataProcessor.process_era5_file)(cfg.ERA5_UA_FILE, 'u', 'ua', level_val=cfg.WIND_LEVEL)
+
+    logging.info("Executing data loading tasks in parallel...")
+    pr_monthly, tas_monthly, ua850_monthly = dask.compute(lazy_pr, lazy_tas, lazy_ua850)
+    logging.info("Finished parallel data loading.")
 
     # --- 2. Calculate spatial means for the box (monthly) ---
     logging.info("Calculating monthly spatial means (box)...")
@@ -93,9 +104,9 @@ def run_data_preparation():
 
     # --- 5. Load discharge data ---
     logging.info("Loading Danube discharge data...")
-    discharge_df = pd.read_excel(cfg.DISCHARGE_FILE, usecols='A,B,H', names=['year', 'month', 'discharge'])
-    discharge_df['time'] = pd.to_datetime(discharge_df[['year', 'month']].assign(day=1))
-    discharge_df = discharge_df.set_index('time').drop(columns=['year', 'month']).dropna()
+    discharge_df = pd.read_excel(cfg.DISCHARGE_FILE, usecols='A,H', names=['time', 'discharge'])
+    discharge_df['time'] = pd.to_datetime(discharge_df['time'], dayfirst=True)
+    discharge_df = discharge_df.set_index('time').dropna()
 
     # --- 6. Combine all data into one DataFrame ---
     logging.info("Combining all time series into a final DataFrame...")
@@ -109,11 +120,14 @@ def run_data_preparation():
     # Add seasonal jet indices (forward-fill to have a value for each month)
     for key, da in jet_data.items():
         if da is not None:
-            # Create a time index for the seasonal data
             season_df = da.to_dataframe(name=key)
-            # Use the first month of the season as the timestamp (e.g., Dec for DJF, Jun for JJA)
             month_map = {'Winter': 12, 'Summer': 6}
-            start_month = month_map[da.season.values[0]]
+            
+            # === KORRIGIERTE STELLE ===
+            # Get the scalar season name (e.g., 'Winter') from the 0-dimensional array
+            season_name = da.season.item()
+            start_month = month_map[season_name]
+            
             season_df.index = [pd.to_datetime(f'{year}-{start_month}-01') for year in season_df.index]
             df = pd.merge(df, season_df, left_index=True, right_index=True, how='left')
     
@@ -122,8 +136,8 @@ def run_data_preparation():
         df[col] = df[col].ffill()
 
     # Add the target variable (discharge)
-    final_df = df.join(discharge_df, how='inner') # 'inner' join to keep only timestamps where all data is available
-    final_df = final_df.dropna() # Final safety check
+    final_df = df.join(discharge_df, how='inner') 
+    final_df = final_df.dropna() 
 
     # --- 7. Save the final dataset ---
     final_df.to_csv(cfg.PROCESSED_DATA_FILE)
@@ -131,6 +145,10 @@ def run_data_preparation():
     logging.info(f"Shape of the dataset: {final_df.shape}")
     logging.info(f"Time range: {final_df.index.min()} to {final_df.index.max()}")
     logging.info(f"Available columns: {final_df.columns.tolist()}")
+    
+    # --- 8. Shutdown Dask client ---
+    client.close()
+
 
 if __name__ == '__main__':
     run_data_preparation()
