@@ -1,4 +1,4 @@
-# prepare_dataset.py (mit Dask und Fehlerkorrektur)
+# prepare_dataset.py (with Dask and error correction)
 import sys
 import os
 
@@ -110,39 +110,45 @@ def run_data_preparation():
 
     # --- 6. Combine all data into one DataFrame ---
     logging.info("Combining all time series into a final DataFrame...")
-
+    
+    # Create the base dataframe with the monthly data
     df = pd.DataFrame({
         'tas_box': tas_box_monthly.to_series(),
         'pr_box': pr_box_monthly.to_series(),
         'spei_4_box': spei_4_box_monthly.to_series()
     })
-
-    # Add seasonal jet indices (forward-fill to have a value for each month)
+    
+    # Add the seasonal jet indices
     for key, da in jet_data.items():
         if da is not None:
-            # Create a pandas Series directly from the data and coordinates
-            # This avoids creating an extra 'season' column that causes the merge error
-            data_series = pd.Series(da.values, index=da.time.dt.year.values, name=key)
+            # Convert the DataArray (indexed by 'year') to a pandas Series
+            jet_series = da.to_series()
+            jet_series.name = key
             
-            month_map = {'Winter': 12, 'Summer': 6}
-            season_name = da.season.item()
-            start_month = month_map[season_name]
-            
-            # Create the correct DatetimeIndex
-            new_index = [pd.to_datetime(f'{year}-{start_month}-01') for year in data_series.index]
-            data_series.index = new_index
-            
-            # Join the series to the main DataFrame
-            df = df.join(data_series)
+            # Create a DatetimeIndex to align the yearly data correctly
+            # DJF (Winter) is assigned to December of the respective year
+            # JJA (Summer) is assigned to June of the respective year
+            if 'djf' in key:
+                month = 12
+            elif 'jja' in key:
+                month = 6
+            else:
+                continue # Skip if other seasons are present
 
-    # Forward-fill seasonal values
-    for col in [key for key in jet_data.keys()]:
-        if col in df.columns: # Check if column exists before trying to fill
+            new_index = [pd.to_datetime(f'{year}-{month}-01') for year in jet_series.index]
+            jet_series.index = new_index
+            
+            # Join with the main dataframe
+            df = df.join(jet_series, how='left')
+    
+    # Forward-fill the seasonal values to propagate them to subsequent months
+    for col in jet_data.keys():
+        if col in df.columns:
             df[col] = df[col].ffill()
 
-    # Add the target variable (discharge)
+    # Add the target variable (discharge) and clean up NaN values
     final_df = df.join(discharge_df, how='inner') 
-    final_df = final_df.dropna()
+    final_df = final_df.dropna() 
 
     # --- 7. Save the final dataset ---
     final_df.to_csv(cfg.PROCESSED_DATA_FILE)
