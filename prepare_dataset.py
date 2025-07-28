@@ -110,34 +110,39 @@ def run_data_preparation():
 
     # --- 6. Combine all data into one DataFrame ---
     logging.info("Combining all time series into a final DataFrame...")
-    
+
     df = pd.DataFrame({
         'tas_box': tas_box_monthly.to_series(),
         'pr_box': pr_box_monthly.to_series(),
         'spei_4_box': spei_4_box_monthly.to_series()
     })
-    
+
     # Add seasonal jet indices (forward-fill to have a value for each month)
     for key, da in jet_data.items():
         if da is not None:
-            season_df = da.to_dataframe(name=key)
-            month_map = {'Winter': 12, 'Summer': 6}
+            # Create a pandas Series directly from the data and coordinates
+            # This avoids creating an extra 'season' column that causes the merge error
+            data_series = pd.Series(da.values, index=da.time.dt.year.values, name=key)
             
-            # === KORRIGIERTE STELLE ===
-            # Get the scalar season name (e.g., 'Winter') from the 0-dimensional array
+            month_map = {'Winter': 12, 'Summer': 6}
             season_name = da.season.item()
             start_month = month_map[season_name]
             
-            season_df.index = [pd.to_datetime(f'{year}-{start_month}-01') for year in season_df.index]
-            df = pd.merge(df, season_df, left_index=True, right_index=True, how='left')
-    
+            # Create the correct DatetimeIndex
+            new_index = [pd.to_datetime(f'{year}-{start_month}-01') for year in data_series.index]
+            data_series.index = new_index
+            
+            # Join the series to the main DataFrame
+            df = df.join(data_series)
+
     # Forward-fill seasonal values
     for col in [key for key in jet_data.keys()]:
-        df[col] = df[col].ffill()
+        if col in df.columns: # Check if column exists before trying to fill
+            df[col] = df[col].ffill()
 
     # Add the target variable (discharge)
     final_df = df.join(discharge_df, how='inner') 
-    final_df = final_df.dropna() 
+    final_df = final_df.dropna()
 
     # --- 7. Save the final dataset ---
     final_df.to_csv(cfg.PROCESSED_DATA_FILE)
