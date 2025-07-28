@@ -68,7 +68,7 @@ def run_prediction():
     plot_filename = os.path.join(cfg.MODEL_OUTPUT_DIR, 'prediction_vs_actual.png')
     plt.savefig(plot_filename, dpi=300)
     print(f"Prediction plot saved to: {plot_filename}")
-    plt.show()
+    #plt.show()
 
 if __name__ == '__main__':
     run_prediction()
