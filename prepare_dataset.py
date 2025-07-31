@@ -23,12 +23,12 @@ def load_and_process_era5_grid(file_path, var_name, lat_min, lat_max, lon_min, l
     logging.info(f"Processing ERA5 data from {file_path} for var '{var_name}' as a spatial grid...")
     try:
         ds = xr.open_dataset(file_path)
-        
-        # Select pressure level if specified
+
+        if 'longitude' in ds.coords and ds['longitude'].max() > 180:
+            ds = ds.assign_coords(longitude=(((ds.longitude + 180) % 360) - 180)).sortby('longitude')
+
         if pressure_level:
-            # Check for common coordinate names for pressure levels
             if 'level' in ds.coords:
-                # *** FIXED: Corrected log message units ***
                 logging.info(f"Selecting pressure level {pressure_level} hPa/millibars from 'level' coordinate...")
                 ds = ds.sel(level=pressure_level, method='nearest')
             elif 'plev' in ds.coords:
@@ -37,37 +37,37 @@ def load_and_process_era5_grid(file_path, var_name, lat_min, lat_max, lon_min, l
             else:
                  logging.warning(f"Pressure level coordinate not found in {file_path}. Cannot select level {pressure_level}.")
 
-
-        # Slice the dataset to the bounding box
         data_box = ds[var_name].sel(
             latitude=slice(lat_max, lat_min),
             longitude=slice(lon_min, lon_max)
         )
-        
-        # Convert the xarray DataArray to a pandas DataFrame
+
         df_flat = data_box.to_dataframe()
 
-        # Pivot the table to have 'time' as index and each grid cell as a separate column
         df_pivot = df_flat.reset_index().pivot_table(
             index='time',
             columns=['latitude', 'longitude'],
             values=var_name
         )
+        
+        # *** FIXED: Normalize the index to remove the time component ***
+        df_pivot.index = pd.to_datetime(df_pivot.index).normalize()
+        df_pivot.index.name = 'date'
 
-        # Create more descriptive column names
+
         base_name_map = {
             'tp': 'precipitation',
             't2m': 'temperature',
             'u': 'wind_u_component'
         }
         base_name = base_name_map.get(var_name, var_name)
-        
+
         df_pivot.columns = [f"{base_name}_lat{lat:.2f}_lon{lon:.2f}" for lat, lon in df_pivot.columns]
-        
+
         if var_name == 'tp':
              logging.info("Converting precipitation from 'm' to 'mm/day'.")
              df_pivot *= 1000
-             
+
         return df_pivot
     except Exception as e:
         logging.error(f"Error processing file {file_path}: {e}")
@@ -88,7 +88,7 @@ def create_sequences(features, targets, seq_length, horizons):
     logging.info(f"Creating sequences with length {seq_length}...")
     X, y = [], []
     max_horizon = max(horizons)
-    
+
     for i in range(len(features) - seq_length - max_horizon + 1):
         X.append(features[i : i + seq_length])
         current_targets = []
@@ -100,35 +100,30 @@ def create_sequences(features, targets, seq_length, horizons):
 def main():
     """Main function to run the data preparation pipeline."""
     os.makedirs(config.PROCESSED_DATA_DIR, exist_ok=True)
-    
+
     # --- 1. Load Data ---
-    # Box for variables directly influencing the catchment area
     HYDROLOGICAL_BOX_LAT_MIN, HYDROLOGICAL_BOX_LAT_MAX = 46.0, 51.0
     HYDROLOGICAL_BOX_LON_MIN, HYDROLOGICAL_BOX_LON_MAX = 8.0, 18.0
 
-    # Box for large-scale atmospheric patterns
     JET_STREAM_BOX_LAT_MIN, JET_STREAM_BOX_LAT_MAX = 40.0, 60.0
     JET_STREAM_BOX_LON_MIN, JET_STREAM_BOX_LON_MAX = -20.0, 20.0
 
-    # Load precipitation and temperature using the hydrological box
     df_pr = load_and_process_era5_grid(config.ERA5_PRECIPITATION_NC_PATH, config.ERA5_VARS["precipitation"], HYDROLOGICAL_BOX_LAT_MIN, HYDROLOGICAL_BOX_LAT_MAX, HYDROLOGICAL_BOX_LON_MIN, HYDROLOGICAL_BOX_LON_MAX)
     df_tas = load_and_process_era5_grid(config.ERA5_TEMPERATURE_NC_PATH, config.ERA5_VARS["temperature"], HYDROLOGICAL_BOX_LAT_MIN, HYDROLOGICAL_BOX_LAT_MAX, HYDROLOGICAL_BOX_LON_MIN, HYDROLOGICAL_BOX_LON_MAX)
-    
-    # Load wind data using the correct pressure level value in millibars (hPa)
     df_ua = load_and_process_era5_grid(
-        config.ERA5_WIND_NC_PATH, 
-        config.ERA5_VARS["wind"], 
-        JET_STREAM_BOX_LAT_MIN, 
-        JET_STREAM_BOX_LAT_MAX, 
-        JET_STREAM_BOX_LON_MIN, 
+        config.ERA5_WIND_NC_PATH,
+        config.ERA5_VARS["wind"],
+        JET_STREAM_BOX_LAT_MIN,
+        JET_STREAM_BOX_LAT_MAX,
+        JET_STREAM_BOX_LON_MIN,
         JET_STREAM_BOX_LON_MAX,
-        pressure_level=850 # The unit is millibars, so 850 is correct.
+        pressure_level=850
     )
-    
+
     logging.info(f"Loading discharge data from {config.DISCHARGE_XLSX_PATH}...")
-    
+
     target_rename = 'discharge'
-    
+
     try:
         df_discharge = pd.read_excel(config.DISCHARGE_XLSX_PATH)
         df_discharge['date'] = pd.to_datetime(df_discharge['year'].astype(str) + '-' + df_discharge['month'].astype(str) + '-01')
@@ -147,17 +142,16 @@ def main():
 
     # --- 2. Combine and Preprocess ---
     logging.info("Combining all data sources...")
+    
     all_dfs = [df_discharge_daily, df_pr, df_tas, df_ua]
     all_dfs = [df for df in all_dfs if not df.empty]
-    
+
     if len(all_dfs) < 4:
-        logging.error("One or more data sources could not be loaded. Aborting.")
+        logging.error("One or more data sources could not be loaded or are empty. Aborting.")
         return
 
-    # *** FIXED: Use an 'inner' join to only keep dates that exist in ALL dataframes ***
     df_combined = pd.concat(all_dfs, axis=1, join='inner')
-    
-    # Check if the combined dataframe is empty after the inner join
+
     if df_combined.empty:
         logging.error("The combined dataframe is empty after inner join. Check for time overlap in data sources.")
         return
@@ -166,7 +160,7 @@ def main():
     df_combined = df_combined.sort_index()
 
     df_processed = create_cyclical_features(df_combined.copy())
-    
+
     # --- 3. Split Features and Targets ---
     features_df = df_processed.drop(columns=[target_rename])
     targets_df = df_processed[[target_rename]]
@@ -177,10 +171,10 @@ def main():
     logging.info("Scaling features and targets...")
     feature_scaler = StandardScaler()
     target_scaler = StandardScaler()
-    
+
     features_scaled = feature_scaler.fit_transform(features_df)
     targets_scaled = target_scaler.fit_transform(targets_df)
-    
+
     joblib.dump(feature_scaler, config.SCALER_PATH)
     joblib.dump(target_scaler, config.TARGET_SCALER_PATH)
     logging.info(f"Scalers saved to {config.PROCESSED_DATA_DIR}")

@@ -1,0 +1,67 @@
+2025-07-31 14:35:46,017 - INFO - Using device: cpu
+2025-07-31 14:35:46,017 - INFO - PyTorch is configured to use a maximum of 48 threads.
+2025-07-31 14:35:46,017 - INFO - Loading preprocessed data...
+2025-07-31 14:35:49,057 - INFO - Model architecture:
+LSTMForecastModel(
+  (lstm): LSTM(171, 128, num_layers=2, batch_first=True, dropout=0.2)
+  (fc): Linear(in_features=128, out_features=3, bias=True)
+)
+2025-07-31 14:35:49,057 - INFO - Starting training...
+2025-07-31 14:36:19,984 - INFO - Epoch [1/50], Validation Loss: 0.587959
+2025-07-31 14:36:19,999 - INFO - Model saved with improved validation loss: 0.587959
+2025-07-31 14:36:49,524 - INFO - Epoch [2/50], Validation Loss: 0.566280
+2025-07-31 14:36:49,539 - INFO - Model saved with improved validation loss: 0.566280
+2025-07-31 14:37:18,585 - INFO - Epoch [3/50], Validation Loss: 0.531956
+2025-07-31 14:37:18,599 - INFO - Model saved with improved validation loss: 0.531956
+2025-07-31 14:37:47,421 - INFO - Epoch [4/50], Validation Loss: 0.563716
+2025-07-31 14:38:15,522 - INFO - Epoch [5/50], Validation Loss: 0.516885
+2025-07-31 14:38:15,539 - INFO - Model saved with improved validation loss: 0.516885
+2025-07-31 14:38:43,443 - INFO - Epoch [6/50], Validation Loss: 0.536599
+2025-07-31 14:39:11,754 - INFO - Epoch [7/50], Validation Loss: 0.531495
+2025-07-31 14:39:39,800 - INFO - Epoch [8/50], Validation Loss: 0.545484
+2025-07-31 14:40:08,173 - INFO - Epoch [9/50], Validation Loss: 0.543098
+2025-07-31 14:40:36,778 - INFO - Epoch [10/50], Validation Loss: 0.530013
+2025-07-31 14:41:05,008 - INFO - Epoch [11/50], Validation Loss: 0.528454
+2025-07-31 14:41:32,803 - INFO - Epoch [12/50], Validation Loss: 0.544640
+2025-07-31 14:42:00,114 - INFO - Epoch [13/50], Validation Loss: 0.537577
+2025-07-31 14:42:28,445 - INFO - Epoch [14/50], Validation Loss: 0.527285
+2025-07-31 14:42:56,975 - INFO - Epoch [15/50], Validation Loss: 0.529661
+2025-07-31 14:43:24,893 - INFO - Epoch [16/50], Validation Loss: 0.520916
+2025-07-31 14:43:52,906 - INFO - Epoch [17/50], Validation Loss: 0.551455
+2025-07-31 14:44:21,326 - INFO - Epoch [18/50], Validation Loss: 0.489649
+2025-07-31 14:44:21,340 - INFO - Model saved with improved validation loss: 0.489649
+2025-07-31 14:44:49,038 - INFO - Epoch [19/50], Validation Loss: 0.511001
+2025-07-31 14:45:16,714 - INFO - Epoch [20/50], Validation Loss: 0.550543
+2025-07-31 14:45:44,803 - INFO - Epoch [21/50], Validation Loss: 0.539504
+2025-07-31 14:46:12,919 - INFO - Epoch [22/50], Validation Loss: 0.526008
+2025-07-31 14:46:40,910 - INFO - Epoch [23/50], Validation Loss: 0.567271
+2025-07-31 14:47:09,329 - INFO - Epoch [24/50], Validation Loss: 0.520182
+2025-07-31 14:47:37,447 - INFO - Epoch [25/50], Validation Loss: 0.530162
+2025-07-31 14:48:05,272 - INFO - Epoch [26/50], Validation Loss: 0.519191
+2025-07-31 14:48:32,926 - INFO - Epoch [27/50], Validation Loss: 0.505679
+2025-07-31 14:49:00,867 - INFO - Epoch [28/50], Validation Loss: 0.501615
+2025-07-31 14:49:28,884 - INFO - Epoch [29/50], Validation Loss: 0.497841
+2025-07-31 14:49:57,031 - INFO - Epoch [30/50], Validation Loss: 0.529242
+2025-07-31 14:50:24,935 - INFO - Epoch [31/50], Validation Loss: 0.529496
+2025-07-31 14:50:52,983 - INFO - Epoch [32/50], Validation Loss: 0.542456
+2025-07-31 14:51:20,911 - INFO - Epoch [33/50], Validation Loss: 0.568435
+2025-07-31 14:51:48,982 - INFO - Epoch [34/50], Validation Loss: 0.522890
+2025-07-31 14:52:16,737 - INFO - Epoch [35/50], Validation Loss: 0.525966
+2025-07-31 14:52:45,153 - INFO - Epoch [36/50], Validation Loss: 0.603121
+2025-07-31 14:53:13,515 - INFO - Epoch [37/50], Validation Loss: 0.486729
+2025-07-31 14:53:13,530 - INFO - Model saved with improved validation loss: 0.486729
+2025-07-31 14:53:42,167 - INFO - Epoch [38/50], Validation Loss: 0.492005
+2025-07-31 14:54:10,619 - INFO - Epoch [39/50], Validation Loss: 0.511781
+2025-07-31 14:54:39,131 - INFO - Epoch [40/50], Validation Loss: 0.498684
+2025-07-31 14:55:07,251 - INFO - Epoch [41/50], Validation Loss: 0.493636
+2025-07-31 14:55:35,127 - INFO - Epoch [42/50], Validation Loss: 0.468208
+2025-07-31 14:55:35,142 - INFO - Model saved with improved validation loss: 0.468208
+2025-07-31 14:56:03,262 - INFO - Epoch [43/50], Validation Loss: 0.495226
+2025-07-31 14:56:31,450 - INFO - Epoch [44/50], Validation Loss: 0.494112
+2025-07-31 14:56:59,644 - INFO - Epoch [45/50], Validation Loss: 0.487581
+2025-07-31 14:57:27,750 - INFO - Epoch [46/50], Validation Loss: 0.482211
+2025-07-31 14:57:56,024 - INFO - Epoch [47/50], Validation Loss: 0.506645
+2025-07-31 14:58:24,299 - INFO - Epoch [48/50], Validation Loss: 0.523709
+2025-07-31 14:58:52,125 - INFO - Epoch [49/50], Validation Loss: 0.544115
+2025-07-31 14:59:20,337 - INFO - Epoch [50/50], Validation Loss: 0.492621
+2025-07-31 14:59:20,337 - INFO - Training finished.
