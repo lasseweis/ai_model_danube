@@ -7,9 +7,11 @@ import os
 DISCHARGE_BASE_PATH = '/nas/home/vlw/Desktop/STREAM/STREAM/'
 DISCHARGE_XLSX_PATH = os.path.join(DISCHARGE_BASE_PATH, 'danube_discharge_monthly_1893-2021.xlsx')
 
-ERA5_PRECIPITATION_NC_PATH = '/data/reloclim/normal/ERA5_daily/ERA5_0p25_day_PR_19500101-20221231.nc'
-ERA5_TEMPERATURE_NC_PATH = '/data/reloclim/normal/ERA5_daily/ERA5_0p25_day_TAS_19500101-20221231.nc'
-ERA5_WIND_NC_PATH = '/data/reloclim/normal/ERA5_daily/ERA5_025_day_ua850_19500101-20211231.nc'
+# *** FIXED: Updated ERA5 data paths ***
+ERA5_PRECIPITATION_NC_PATH = '/data/reloclim/normal/ERA5_daily/ERA5_2p5cdo_day_PR_19500101-20221231.nc'
+ERA5_TEMPERATURE_NC_PATH = '/data/reloclim/normal/ERA5_daily/ERA5_2p5cdo_day_TAS_19500101-20221231.nc'
+ERA5_WIND_NC_PATH = '/data/reloclim/normal/ERA5_daily/ERA5_2p5_day_UA_19580101-20221231.nc'
+
 
 # --- Correct ERA5 Variable Names ---
 # These are the actual variable names found in the NetCDF files.
