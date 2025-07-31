@@ -1,165 +1,147 @@
-# prepare_dataset.py (with Dask and error correction)
-import sys
+# prepare_dataset.py
+
 import os
-
-# This block allows Python to import modules from the sibling project directory.
-# Your setup is assumed to be:
-# /nas/home/vlw/Desktop/STREAM/Code/
-#  |-- paper1-project/
-#  |   |-- data_processing.py
-#  |   +-- ...
-#  +-- ai_model_danube/
-#      +-- prepare_dataset.py  (this file)
-
-# 1. Get the absolute path to the directory containing this script (danube-ai-prediction)
-current_dir = os.path.dirname(os.path.abspath(__file__))
-
-# 2. Get the parent directory (which is /nas/home/vlw/Desktop/STREAM/Code/)
-parent_dir = os.path.dirname(current_dir)
-
-# 3. Construct the path to your analysis project directory
-analysis_project_path = os.path.join(parent_dir, 'paper1-project')
-
-# 4. Add this path to Python's list of search paths
-if analysis_project_path not in sys.path:
-    sys.path.append(analysis_project_path)
-
 import pandas as pd
-import xarray as xr
 import numpy as np
+import xarray as xr
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+import torch
+import joblib
 import logging
-import dask
-from dask.distributed import Client
 
-# Import the original classes from your previous project
-from data_processing import DataProcessor
-from jet_analyzer import JetStreamAnalyzer
-from stats_analyzer import StatsAnalyzer
-from config_ai import Config as cfg
+import config_ai as config
 
+# Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def calculate_monthly_indices(da_monthly):
-    """
-    Calculates monthly jet indices from monthly U850 data.
-    Unlike the seasonal calculation, this produces a value for each month.
-    """
-    if da_monthly is None:
-        return None, None
+def load_and_process_era5(file_path, var_name, desired_lat, desired_lon):
+    """Loads and processes a single ERA5 NetCDF file."""
+    logging.info(f"Processing ERA5 data from {file_path} for variable '{var_name}'...")
+    try:
+        ds = xr.open_dataset(file_path)
+        data_point = ds[var_name].sel(lat=desired_lat, lon=desired_lon, method='nearest')
+        df = data_point.to_dataframe(name=var_name).drop(columns=['lat', 'lon'], errors='ignore')
         
-    # Jet speed index for each month
-    jet_speed_monthly = JetStreamAnalyzer.calculate_jet_speed_index(da_monthly)
+        # Rename the column to be more generic for concatenation
+        column_rename_map = {
+            'tp': 'precipitation',
+            't2m': 'temperature',
+            'u': 'wind_u_component'
+        }
+        df.rename(columns={var_name: column_rename_map.get(var_name, var_name)}, inplace=True)
+
+        if var_name == 'tp': # Special handling for total precipitation
+             logging.info("Converting precipitation from 'm' to 'mm/day'.")
+             df['precipitation'] *= 1000
+             
+        return df
+    except Exception as e:
+        logging.error(f"Error processing file {file_path}: {e}")
+        return pd.DataFrame()
+
+def create_cyclical_features(df):
+    """Creates sine and cosine features for the day of the year."""
+    logging.info("Creating cyclical features for seasonality...")
+    df['dayofyear'] = df.index.dayofyear
+    df['sin_day'] = np.sin(2 * np.pi * df['dayofyear'] / 365.25)
+    df['cos_day'] = np.cos(2 * np.pi * df['dayofyear'] / 365.25)
+    df = df.drop(columns=['dayofyear'])
+    return df
+
+def create_sequences(features, targets, seq_length, horizons):
+    """Creates input sequences and corresponding future targets."""
+    logging.info(f"Creating sequences with length {seq_length}...")
+    X, y = [], []
+    max_horizon = max(horizons)
     
-    # Jet latitude index for each month
-    jet_lat_monthly = JetStreamAnalyzer.calculate_jet_lat_index(da_monthly)
+    for i in range(len(features) - seq_length - max_horizon + 1):
+        X.append(features[i : i + seq_length])
+        current_targets = []
+        for h in horizons:
+            current_targets.append(targets[i + seq_length + h - 1])
+        y.append(current_targets)
+    return np.array(X), np.array(y)
+
+def main():
+    """Main function to run the data preparation pipeline."""
+    os.makedirs(config.PROCESSED_DATA_DIR, exist_ok=True)
     
-    return jet_speed_monthly, jet_lat_monthly
+    # --- 1. Load Data ---
+    danube_lat, danube_lon = 48.2082, 16.3738 # Example: Vienna (please adjust if needed)
 
-
-def run_data_preparation():
-    """
-    Executes the entire data preparation process, parallelized with Dask.
-    1. Loads ERA5 data in parallel.
-    2. Calculates monthly box averages and indices.
-    3. Loads discharge data.
-    4. Combines everything into a single DataFrame.
-    5. Saves the final dataset.
-    """
-    # Start a local Dask client to utilize all available CPU cores.
-    client = Client()
-    logging.info(f"Dask client started, dashboard available at: {client.dashboard_link}")
+    # *** FIXED: Using correct variable names from config ***
+    df_pr = load_and_process_era5(config.ERA5_PRECIPITATION_NC_PATH, config.ERA5_VARS["precipitation"], danube_lat, danube_lon)
+    df_tas = load_and_process_era5(config.ERA5_TEMPERATURE_NC_PATH, config.ERA5_VARS["temperature"], danube_lat, danube_lon)
+    df_ua = load_and_process_era5(config.ERA5_WIND_NC_PATH, config.ERA5_VARS["wind"], danube_lat, danube_lon)
     
-    logging.info("Starting data preparation for the AI model...")
-
-    # --- 1. Load and process climate data in parallel ---
-    logging.info("Lazily scheduling ERA5 data loading tasks...")
+    logging.info(f"Loading discharge data from {config.DISCHARGE_XLSX_PATH}...")
+    # *** FIXED: Using correct column names from original repository ***
+    date_column_name = 'Date (YYYY-MM-DD)'
+    discharge_column_name = 'Discharge (m3/s)'
+    target_rename = 'discharge'
     
-    lazy_pr = dask.delayed(DataProcessor.process_era5_file)(cfg.ERA5_PR_FILE, 'pr')
-    lazy_tas = dask.delayed(DataProcessor.process_era5_file)(cfg.ERA5_TAS_FILE, 'tas')
-    lazy_ua850 = dask.delayed(DataProcessor.process_era5_file)(cfg.ERA5_UA_FILE, 'u', 'ua', level_val=cfg.WIND_LEVEL)
+    try:
+        df_discharge = pd.read_excel(config.DISCHARGE_XLSX_PATH)
+        df_discharge = df_discharge.rename(columns={
+            date_column_name: 'date',
+            discharge_column_name: target_rename
+        })
+        df_discharge['date'] = pd.to_datetime(df_discharge['date'])
+        df_discharge = df_discharge.set_index('date')
+    except FileNotFoundError:
+        logging.error(f"Discharge file not found at {config.DISCHARGE_XLSX_PATH}.")
+        return
+    except KeyError:
+        logging.error(f"Could not find expected columns '{date_column_name}' or '{discharge_column_name}'. Please check the Excel file.")
+        return
 
-    logging.info("Executing data loading tasks in parallel...")
-    pr_monthly, tas_monthly, ua850_monthly = dask.compute(lazy_pr, lazy_tas, lazy_ua850)
-    logging.info("Finished parallel data loading.")
+    logging.info("Upsampling monthly discharge data to daily frequency using forward fill.")
+    df_discharge_daily = df_discharge.resample('D').ffill()
 
-    # --- 2. Calculate spatial means for the box (monthly) ---
-    logging.info("Calculating monthly spatial means (box)...")
-    pr_box_monthly = DataProcessor.calculate_spatial_mean(pr_monthly, cfg.BOX_LAT_MIN, cfg.BOX_LAT_MAX, cfg.BOX_LON_MIN, cfg.BOX_LON_MAX)
-    tas_box_monthly = DataProcessor.calculate_spatial_mean(tas_monthly, cfg.BOX_LAT_MIN, cfg.BOX_LAT_MAX, cfg.BOX_LON_MIN, cfg.BOX_LON_MAX)
+    # --- 2. Combine and Preprocess ---
+    logging.info("Combining all data sources...")
+    df_combined = pd.concat([df_discharge_daily, df_pr, df_tas, df_ua], axis=1)
+    df_combined = df_combined.dropna()
+    df_combined.index = pd.to_datetime(df_combined.index)
+    df_combined = df_combined.sort_index()
 
-    # --- 3. Calculate SPEI for the box (monthly) ---
-    logging.info("Calculating monthly SPEI...")
-    lat_center_of_box = (cfg.BOX_LAT_MIN + cfg.BOX_LAT_MAX) / 2
-    spei_4_box_monthly = DataProcessor.calculate_spei(pr_box_monthly, tas_box_monthly, lat=lat_center_of_box, scale=4)
-
-    # --- 4. Calculate seasonal jet indices (to be mapped to months) ---
-    logging.info("Calculating seasonal jet indices...")
-    ua850_seasonal = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(ua850_monthly))
+    df_processed = create_cyclical_features(df_combined.copy())
     
-    jet_data = {}
-    for season, s_label in [('Winter', 'djf'), ('Summer', 'jja')]:
-        ua_season = DataProcessor.filter_by_season(ua850_seasonal, season)
-        jet_data[f'jet_speed_{s_label}'] = JetStreamAnalyzer.calculate_jet_speed_index(ua_season)
-        jet_data[f'jet_lat_{s_label}'] = JetStreamAnalyzer.calculate_jet_lat_index(ua_season)
+    # --- 3. Split Features and Targets ---
+    features_df = df_processed.drop(columns=[target_rename])
+    targets_df = df_processed[[target_rename]]
 
-    # --- 5. Load discharge data ---
-    logging.info("Loading Danube discharge data...")
-    discharge_df = pd.read_excel(cfg.DISCHARGE_FILE, usecols='A,H', names=['time', 'discharge'])
-    discharge_df['time'] = pd.to_datetime(discharge_df['time'], dayfirst=True)
-    discharge_df = discharge_df.set_index('time').dropna()
-
-    # --- 6. Combine all data into one DataFrame ---
-    logging.info("Combining all time series into a final DataFrame...")
+    # --- 4. Scale Data ---
+    logging.info("Scaling features and targets...")
+    feature_scaler = StandardScaler()
+    target_scaler = StandardScaler()
     
-    # Create the base dataframe with the monthly data
-    df = pd.DataFrame({
-        'tas_box': tas_box_monthly.to_series(),
-        'pr_box': pr_box_monthly.to_series(),
-        'spei_4_box': spei_4_box_monthly.to_series()
-    })
+    features_scaled = feature_scaler.fit_transform(features_df)
+    targets_scaled = target_scaler.fit_transform(targets_df)
     
-    # Add the seasonal jet indices
-    for key, da in jet_data.items():
-        if da is not None:
-            # Convert the DataArray (indexed by 'year') to a pandas Series
-            jet_series = da.to_series()
-            jet_series.name = key
-            
-            # Create a DatetimeIndex to align the yearly data correctly
-            # DJF (Winter) is assigned to December of the respective year
-            # JJA (Summer) is assigned to June of the respective year
-            if 'djf' in key:
-                month = 12
-            elif 'jja' in key:
-                month = 6
-            else:
-                continue # Skip if other seasons are present
+    joblib.dump(feature_scaler, config.SCALER_PATH)
+    joblib.dump(target_scaler, config.TARGET_SCALER_PATH)
+    logging.info(f"Scalers saved to {config.PROCESSED_DATA_DIR}")
 
-            new_index = [pd.to_datetime(f'{year}-{month}-01') for year in jet_series.index]
-            jet_series.index = new_index
-            
-            # Join with the main dataframe
-            df = df.join(jet_series, how='left')
-    
-    # Forward-fill the seasonal values to propagate them to subsequent months
-    for col in jet_data.keys():
-        if col in df.columns:
-            df[col] = df[col].ffill()
+    # --- 5. Create Sequences ---
+    X, y = create_sequences(features_scaled, targets_scaled.flatten(), config.SEQUENCE_LENGTH, config.PREDICTION_HORIZONS)
 
-    # Add the target variable (discharge) and clean up NaN values
-    final_df = df.join(discharge_df, how='inner') 
-    final_df = final_df.dropna() 
+    if len(X) == 0:
+        logging.error("Not enough data to create sequences. Check data length and parameters.")
+        return
 
-    # --- 7. Save the final dataset ---
-    final_df.to_csv(cfg.PROCESSED_DATA_FILE)
-    logging.info(f"Data preparation complete. Final dataset saved to: {cfg.PROCESSED_DATA_FILE}")
-    logging.info(f"Shape of the dataset: {final_df.shape}")
-    logging.info(f"Time range: {final_df.index.min()} to {final_df.index.max()}")
-    logging.info(f"Available columns: {final_df.columns.tolist()}")
-    
-    # --- 8. Shutdown Dask client ---
-    client.close()
+    # --- 6. Split into Train, Validation, Test Sets ---
+    logging.info("Splitting data...")
+    X_train_val, X_test, y_train_val, y_test = train_test_split(X, y, test_size=0.15, shuffle=False)
+    X_train, X_valid, y_train, y_valid = train_test_split(X_train_val, y_train_val, test_size=0.15, shuffle=False)
+    logging.info(f"Training set: {X_train.shape[0]}, Validation set: {X_valid.shape[0]}, Test set: {X_test.shape[0]}")
 
+    # --- 7. Save as PyTorch Tensors ---
+    torch.save({'X': torch.FloatTensor(X_train), 'y': torch.FloatTensor(y_train)}, config.TRAIN_DATA_PATH)
+    torch.save({'X': torch.FloatTensor(X_valid), 'y': torch.FloatTensor(y_valid)}, config.VALID_DATA_PATH)
+    torch.save({'X': torch.FloatTensor(X_test), 'y': torch.FloatTensor(y_test)}, config.TEST_DATA_PATH)
+    logging.info(f"Processed data saved to {config.PROCESSED_DATA_DIR}")
 
 if __name__ == '__main__':
-    run_data_preparation()
+    main()

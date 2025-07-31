@@ -1,62 +1,45 @@
 # config_ai.py
+
+import torch
 import os
 
-class Config:
-    """Configuration for the AI Danube discharge prediction project."""
-    
-    # --- DATA PATHS (adopted from the original project) ---
-    # Base path for reanalysis data
-    DATA_BASE_PATH = '/nas/home/vlw/Desktop/STREAM/STREAM/'
+# --- Data Paths ---
+DISCHARGE_BASE_PATH = '/nas/home/vlw/Desktop/STREAM/STREAM/'
+DISCHARGE_XLSX_PATH = os.path.join(DISCHARGE_BASE_PATH, 'danube_discharge_monthly_1893-2021.xlsx')
 
-    # Use the higher-resolution ERA5 data as the primary source
-    ERA5_BASE_PATH = '/data/reloclim/normal/ERA5_daily/'
-    ERA5_UA_FILE = os.path.join(ERA5_BASE_PATH, 'ERA5_025_day_ua850_19500101-20211231.nc')
-    ERA5_PR_FILE = os.path.join(ERA5_BASE_PATH, 'ERA5_0p25_day_PR_19500101-20221231.nc')
-    ERA5_TAS_FILE = os.path.join(ERA5_BASE_PATH, 'ERA5_0p25_day_TAS_19500101-20221231.nc')
-    
-    # Discharge data
-    DISCHARGE_FILE = os.path.join(DATA_BASE_PATH, 'danube_discharge_monthly_1893-2021.xlsx')
+ERA5_PRECIPITATION_NC_PATH = '/data/reloclim/normal/ERA5_daily/ERA5_0p25_day_PR_19500101-20221231.nc'
+ERA5_TEMPERATURE_NC_PATH = '/data/reloclim/normal/ERA5_daily/ERA5_0p25_day_TAS_19500101-20221231.nc'
+ERA5_WIND_NC_PATH = '/data/reloclim/normal/ERA5_daily/ERA5_025_day_ua850_19500101-20211231.nc'
 
-    # --- REGION DEFINITIONS (from the original project) ---
-    # Analysis box for temperature and precipitation (Danube catchment area)
-    BOX_LAT_MIN, BOX_LAT_MAX = 46.0, 51.0
-    BOX_LON_MIN, BOX_LON_MAX = 8.0, 18.0
+# --- Correct ERA5 Variable Names ---
+# These are the actual variable names found in the NetCDF files.
+ERA5_VARS = {
+    "precipitation": "tp",
+    "temperature": "t2m",
+    "wind": "u"
+}
 
-    # Jet index boxes
-    JET_SPEED_BOX_LAT_MIN, JET_SPEED_BOX_LAT_MAX = 40.0, 60.0
-    JET_SPEED_BOX_LON_MIN, JET_SPEED_BOX_LON_MAX = -20.0, 20.0
-    JET_LAT_BOX_LAT_MIN, JET_LAT_BOX_LAT_MAX = 30.0, 70.0
-    JET_LAT_BOX_LON_MIN, JET_LAT_BOX_LON_MAX = -20.0, 0.0
-    
-    # Wind level
-    WIND_LEVEL = 850  # 850 hPa
+# --- Processed Data Paths ---
+PROCESSED_DATA_DIR = './processed_data'
+TRAIN_DATA_PATH = f'{PROCESSED_DATA_DIR}/train.pt'
+VALID_DATA_PATH = f'{PROCESSED_DATA_DIR}/valid.pt'
+TEST_DATA_PATH = f'{PROCESSED_DATA_DIR}/test.pt'
+SCALER_PATH = f'{PROCESSED_DATA_DIR}/scaler.pkl'
+TARGET_SCALER_PATH = f'{PROCESSED_DATA_DIR}/target_scaler.pkl'
 
-    # --- AI MODEL & TRAINING PARAMETERS ---
-    # Name of the final CSV file that serves as input for the model
-    PROCESSED_DATA_FILE = 'danube_monthly_features_for_ai.csv'
-    
-    # Model output directory
-    MODEL_OUTPUT_DIR = 'ai_model_output'
-    
-    # Definition of features (predictors) and the target (variable to predict)
-    FEATURES = [
-        'tas_box', 'pr_box', 'spei_4_box', 
-        'jet_speed_djf', 'jet_lat_djf',
-        'jet_speed_jja', 'jet_lat_jja'
-    ]
-    TARGET = 'discharge'
-    
-    # Look-back window for the LSTM: How many past months do we use 
-    # to predict the next month?
-    LOOK_BACK_WINDOW = 12  # 12 months
-    
-    # Data split for training, validation, and testing
-    TRAIN_SPLIT_YEAR = 1990
-    VALIDATION_SPLIT_YEAR = 2010
-    
-    # LSTM model hyperparameters
-    LSTM_UNITS = 100
-    DROPOUT_RATE = 0.2
-    LEARNING_RATE = 0.001
-    EPOCHS = 100
-    BATCH_SIZE = 32
+# --- Model & Training Parameters ---
+SEQUENCE_LENGTH = 120
+PREDICTION_HORIZONS = [10, 20, 30]
+INPUT_SIZE = -1
+HIDDEN_SIZE = 128
+NUM_LAYERS = 2
+OUTPUT_SIZE = len(PREDICTION_HORIZONS)
+DROPOUT = 0.2
+LEARNING_RATE = 0.001
+NUM_EPOCHS = 50
+BATCH_SIZE = 64
+DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+# --- Prediction & Plotting ---
+MODEL_PATH = './danube_predictor.pth'
+PLOTS_DIR = './plots'
